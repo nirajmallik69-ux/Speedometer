@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Velograph — Live GPS Speedometer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #090b10;
+    --panel: #12161f;
+    --panel-edge: #1d2330;
+    --track: #232a38;
+    --text: #edeff4;
+    --text-dim: #6b7480;
+    --accent: #38bdf8;
+    --accent-soft: #38bdf855;
+    --state-label: "CRUISE";
+    --transition-speed: .6s;
+  }
+  @media (prefers-reduced-motion: reduce){
+    :root{ --transition-speed: .05s; }
+  }
+  *{ box-sizing: border-box; }
+  html,body{
+    margin:0; padding:0;
+    background: radial-gradient(120% 120% at 50% -10%, #10151f 0%, #090b10 55%, #06070a 100%);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    min-height:100vh;
+    overflow-x:hidden;
+  }
+  .app{
+    max-width: 620px;
+    margin: 0 auto;
+    padding: 20px 18px 60px;
+    display:flex;
+    flex-direction:column;
+    gap:22px;
+    position:relative;
+  }
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding: 4px 2px;
+  }
+  .wordmark{
+    font-family:'Rajdhani', sans-serif;
+    font-weight:700;
+    font-size: 22px;
+    letter-spacing: 3px;
+    color: var(--text);
+  }
+  .wordmark span{ color: var(--accent); transition: color var(--transition-speed) ease; }
+  .gps-pill{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 11px;
+    letter-spacing: .5px;
+    color: var(--text-dim);
+  }
+  .gps-dot{
+    width:8px; height:8px; border-radius:50%;
+    background:#f59e0b;
+    box-shadow: 0 0 8px #f59e0b;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  .gps-dot.locked{ background:#34d399; box-shadow:0 0 8px #34d399; animation:none; }
+  .gps-dot.denied{ background:#f43f5e; box-shadow:0 0 8px #f43f5e; animation:none; }
+  @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:.35; } }
+
+  /* ---------- Gauge ---------- */
+  .gauge-stage{
+    position:relative;
+    display:flex;
+    justify-content:center;
+    padding: 6px 0 4px;
+  }
+  .gauge-glow{
+    position:absolute;
+    width: 300px; height:300px;
+    top:50%; left:50%;
+    transform:translate(-50%,-50%);
+    background: radial-gradient(circle, var(--accent-soft) 0%, transparent 70%);
+    filter: blur(10px);
+    transition: background var(--transition-speed) ease;
+    pointer-events:none;
+  }
+  .gauge-wrap{
+    position:relative;
+    width: min(88vw, 380px);
+    aspect-ratio: 1/1;
+    z-index:1;
+  }
+  .gauge{ width:100%; height:100%; display:block; overflow: visible; }
+  .track-arc{
+    fill:none;
+    stroke: var(--track);
+    stroke-width:16;
+    stroke-linecap: round;
+  }
+  .progress-arc{
+    fill:none;
+    stroke: var(--accent);
+    stroke-width:16;
+    stroke-linecap: round;
+    transition: stroke-dashoffset .35s ease-out, stroke var(--transition-speed) ease;
+    filter: drop-shadow(0 0 6px var(--accent-soft));
+  }
+  .tick{ stroke: #3a4254; stroke-width: 2; }
+  .tick.major{ stroke:#4b5468; stroke-width:2.5; }
+  .tick-label{
+    fill: var(--text-dim);
+    font-family:'JetBrains Mono', monospace;
+    font-size: 12px;
+    text-anchor: middle;
+    dominant-baseline: middle;
+  }
+  .needle{
+    stroke: var(--text);
+    stroke-width: 3;
+    stroke-linecap: round;
+    transform-origin: 180px 180px;
+    transition: transform .35s cubic-bezier(.4,1.4,.4,1), stroke var(--transition-speed) ease;
+    filter: drop-shadow(0 0 3px var(--accent-soft));
+  }
+  .hub-outer{ fill:#161b25; stroke: var(--panel-edge); stroke-width:1.5; }
+  .hub-inner{ fill: var(--accent); transition: fill var(--transition-speed) ease; }
+
+  .readout{
+    position:absolute;
+    top: 61%; left:50%;
+    transform: translate(-50%,-50%);
+    text-align:center;
+    pointer-events:none;
+  }
+  .speed-value{
+    font-family:'Rajdhani', sans-serif;
+    font-weight:700;
+    font-size: 68px;
+    line-height:1;
+    color: var(--text);
+    letter-spacing: 1px;
+    font-variant-numeric: tabular-nums;
+  }
+  .speed-unit{
+    font-size: 12px;
+    letter-spacing: 3px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+  .mood-chip{
+    display:inline-block;
+    margin-top: 10px;
+    padding: 4px 14px;
+    border-radius: 999px;
+    font-size: 11px;
+    letter-spacing: 2px;
+    font-weight: 500;
+    color: var(--accent);
+    border: 1px solid var(--accent-soft);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    transition: color var(--transition-speed) ease, border-color var(--transition-speed) ease, background var(--transition-speed) ease;
+  }
+
+  /* ---------- Stats ---------- */
+  .stats{
+    display:grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+  .stat-card{
+    background: var(--panel);
+    border: 1px solid var(--panel-edge);
+    border-radius: 14px;
+    padding: 12px 10px;
+    text-align:center;
+  }
+  .stat-label{
+    font-size: 9.5px;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  .stat-value{
+    font-family:'Rajdhani', sans-serif;
+    font-weight:600;
+    font-size: 20px;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-value small{ font-size: 11px; color: var(--text-dim); font-family:'JetBrains Mono',monospace; }
+
+  /* ---------- Controls ---------- */
+  .controls{
+    display:flex;
+    justify-content:center;
+  }
+  .reset-btn{
+    background: transparent;
+    border: 1px solid var(--panel-edge);
+    color: var(--text-dim);
+    padding: 9px 20px;
+    border-radius: 999px;
+    font-family:'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    cursor:pointer;
+    transition: border-color .2s ease, color .2s ease;
+  }
+  .reset-btn:hover, .reset-btn:focus-visible{ border-color: var(--accent); color: var(--text); }
+  .reset-btn:focus-visible{ outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .footnote{
+    text-align:center;
+    font-size: 10.5px;
+    color: var(--text-dim);
+    letter-spacing: .5px;
+  }
+
+  /* ---------- Start overlay ---------- */
+  .overlay{
+    position: fixed;
+    inset: 0;
+    background: rgba(6,7,10,.92);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    z-index: 10;
+    padding: 20px;
+    transition: opacity .5s ease, visibility .5s ease;
+  }
+  .overlay.hidden{ opacity:0; visibility:hidden; pointer-events:none; }
+  .overlay-card{
+    text-align:center;
+    max-width: 320px;
+  }
+  .overlay-title{
+    font-family:'Rajdhani', sans-serif;
+    font-weight:700;
+    font-size: 26px;
+    letter-spacing: 2px;
+    margin-bottom: 10px;
+  }
+  .overlay-sub{
+    color: var(--text-dim);
+    font-size: 12.5px;
+    line-height:1.6;
+    margin-bottom: 26px;
+  }
+  .ignition{
+    width: 96px; height:96px;
+    border-radius:50%;
+    background: radial-gradient(circle at 35% 30%, #1b2230, #0c0f16 70%);
+    border: 2px solid #2a3140;
+    color: #38bdf8;
+    font-size: 26px;
+    cursor:pointer;
+    box-shadow: 0 0 0 6px #12161f, 0 0 22px #38bdf855;
+    transition: transform .15s ease, box-shadow .2s ease;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .ignition:hover{ box-shadow: 0 0 0 6px #12161f, 0 0 30px #38bdf888; }
+  .ignition:active{ transform: scale(.95); }
+  .ignition:focus-visible{ outline: 2px solid #38bdf8; outline-offset: 4px; }
+  .overlay-error{
+    margin-top:16px;
+    font-size: 11.5px;
+    color: #f43f5e;
+    min-height: 14px;
+  }
+</style>
+</head>
+<body>
+
+<div class="overlay" id="overlay">
+  <div class="overlay-card">
+    <div class="overlay-title">VELO<span style="color:#38bdf8">GRAPH</span></div>
+    <div class="overlay-sub">A live GPS instrument cluster. Turn the ignition to start reading your speed, distance and driving rhythm in real time.</div>
+    <button class="ignition" id="ignitionBtn" aria-label="Start GPS tracking">▶</button>
+    <div class="overlay-error" id="overlayError"></div>
+  </div>
+</div>
+
+<div class="app">
+  <div class="topbar">
+    <div class="wordmark">VELO<span>GRAPH</span></div>
+    <div class="gps-pill">
+      <span class="gps-dot" id="gpsDot"></span>
+      <span id="gpsText">Waiting for GPS</span>
+    </div>
+  </div>
+
+  <div class="gauge-stage">
+    <div class="gauge-glow" id="gaugeGlow"></div>
+    <div class="gauge-wrap">
+      <svg class="gauge" viewBox="0 0 360 360" id="gaugeSvg" role="img" aria-label="Speed gauge">
+        <path class="track-arc" id="trackArc" />
+        <g class="ticks" id="ticksGroup"></g>
+        <path class="progress-arc" id="progressArc" pathLength="270" stroke-dasharray="270" stroke-dashoffset="270" />
+        <line class="needle" id="needle" x1="180" y1="180" x2="180" y2="60" />
+        <circle class="hub-outer" cx="180" cy="180" r="16" />
+        <circle class="hub-inner" id="hubInner" cx="180" cy="180" r="6" />
+      </svg>
+      <div class="readout">
+        <div class="speed-value" id="speedValue">0</div>
+        <div class="speed-unit">KM/H</div>
+        <div class="mood-chip" id="moodChip">IDLE</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-label">MAX SPEED</div>
+      <div class="stat-value" id="maxSpeed">0<small> km/h</small></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">DISTANCE</div>
+      <div class="stat-value" id="distance">0.00<small> km</small></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">AVG SPEED</div>
+      <div class="stat-value" id="avgSpeed">0<small> km/h</small></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">TRIP TIME</div>
+      <div class="stat-value" id="tripTime">00:00</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button class="reset-btn" id="resetBtn">RESET TRIP</button>
+  </div>
+
+  <div class="footnote">Accuracy depends on device GPS. Best results outdoors with a clear sky view.</div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- Config ----------
+  const MAX_SCALE = 220;      // km/h, gauge full scale
+  const MAJOR_STEP = 20;
+  const MINOR_STEP = 10;
+  const CX = 180, CY = 180;
+  const ARC_R = 135;          // track/progress arc radius
+  const TICK_OUTER = { minor: 156, major: 160 };
+  const TICK_INNER = { minor: 146, major: 142 };
+  const LABEL_R = 174;
+  const START_ANGLE = 135;    // degrees, screen convention (0=east,90=south,clockwise)
+  const SWEEP = 270;
+
+  const THEME = {
+    idle:    { accent: '#5b6578', soft: '#5b657855', label: 'IDLE'  },
+    cruise:  { accent: '#38bdf8', soft: '#38bdf855', label: 'CRUISE'},
+    accel:   { accent: '#ff8c42', soft: '#ff8c4266', label: 'ACCEL' },
+    brake:   { accent: '#f43f5e', soft: '#f43f5e66', label: 'BRAKE' }
+  };
+
+  // ---------- DOM ----------
+  const $ = id => document.getElementById(id);
+  const svg = $('gaugeSvg');
+  const trackArc = $('trackArc');
+  const progressArc = $('progressArc');
+  const ticksGroup = $('ticksGroup');
+  const needle = $('needle');
+  const hubInner = $('hubInner');
+  const speedValueEl = $('speedValue');
+  const moodChip = $('moodChip');
+  const gaugeGlow = $('gaugeGlow');
+  const gpsDot = $('gpsDot');
+  const gpsText = $('gpsText');
+  const maxSpeedEl = $('maxSpeed');
+  const distanceEl = $('distance');
+  const avgSpeedEl = $('avgSpeed');
+  const tripTimeEl = $('tripTime');
+  const overlay = $('overlay');
+  const ignitionBtn = $('ignitionBtn');
+  const overlayError = $('overlayError');
+  const resetBtn = $('resetBtn');
+
+  // ---------- Geometry helpers ----------
+  function polar(cx, cy, r, angleDeg){
+    const rad = angleDeg * Math.PI / 180;
+    return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+  }
+  function angleForValue(v){
+    const clamped = Math.max(0, Math.min(MAX_SCALE, v));
+    return START_ANGLE + (clamped / MAX_SCALE) * SWEEP;
+  }
+  function describeArc(cx, cy, r, startDeg, endDeg){
+    const start = polar(cx, cy, r, startDeg);
+    const end = polar(cx, cy, r, endDeg);
+    const largeArc = (endDeg - startDeg) <= 180 ? 0 : 1;
+    return `M ${start.x.toFixed(2)} ${start.y.toFixed(2)} A ${r} ${r} 0 ${largeArc} 1 ${end.x.toFixed(2)} ${end.y.toFixed(2)}`;
+  }
+  const svgNS = 'http://www.w3.org/2000/svg';
+
+  // ---------- Build static gauge ----------
+  function buildGauge(){
+    const d = describeArc(CX, CY, ARC_R, START_ANGLE, START_ANGLE + SWEEP);
+    trackArc.setAttribute('d', d);
+    progressArc.setAttribute('d', d);
+
+    for(let v = 0; v <= MAX_SCALE; v += MINOR_STEP){
+      const isMajor = v % MAJOR_STEP === 0;
+      const angle = angleForValue(v);
+      const outer = polar(CX, CY, isMajor ? TICK_OUTER.major : TICK_OUTER.minor, angle);
+      const inner = polar(CX, CY, isMajor ? TICK_INNER.major : TICK_INNER.minor, angle);
+      const line = document.createElementNS(svgNS, 'line');
+      line.setAttribute('x1', inner.x.toFixed(2));
+      line.setAttribute('y1', inner.y.toFixed(2));
+      line.setAttribute('x2', outer.x.toFixed(2));
+      line.setAttribute('y2', outer.y.toFixed(2));
+      line.setAttribute('class', 'tick' + (isMajor ? ' major' : ''));
+      ticksGroup.appendChild(line);
+
+      if(isMajor){
+        const labelPos = polar(CX, CY, LABEL_R, angle);
+        const text = document.createElementNS(svgNS, 'text');
+        text.setAttribute('x', labelPos.x.toFixed(2));
+        text.setAttribute('y', labelPos.y.toFixed(2));
+        text.setAttribute('class', 'tick-label');
+        text.textContent = v;
+        ticksGroup.appendChild(text);
+      }
+    }
+  }
+  buildGauge();
+
+  // ---------- Live gauge update ----------
+  function setGauge(speed){
+    const clamped = Math.max(0, Math.min(MAX_SCALE, speed));
+    const frac = clamped / MAX_SCALE;
+    progressArc.setAttribute('stroke-dashoffset', (270 - frac * 270).toFixed(2));
+    const angle = angleForValue(clamped);
+    const rotation = angle - 270; // needle drawn pointing "up" (270deg reference)
+    needle.style.transform = `rotate(${rotation.toFixed(2)}deg)`;
+    speedValueEl.textContent = Math.round(speed);
+  }
+
+  function applyTheme(key){
+    const t = THEME[key];
+    document.documentElement.style.setProperty('--accent', t.accent);
+    document.documentElement.style.setProperty('--accent-soft', t.soft);
+    moodChip.textContent = t.label;
+  }
+
+  // ---------- State ----------
+  const state = {
+    watchId: null,
+    lastPos: null,        // { lat, lon, t }
+    speedHistory: [],      // { v, t } smoothed speed samples for trend detection
+    smoothedSpeed: 0,
+    maxSpeed: 0,
+    distanceM: 0,
+    tripStartTs: null,
+    timerInterval: null
+  };
+
+  function haversine(lat1, lon1, lat2, lon2){
+    const R = 6371000;
+    const toRad = d => d * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  function formatTime(sec){
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    const pad = n => String(n).padStart(2, '0');
+    return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+  }
+
+  function updateStatsUI(){
+    maxSpeedEl.innerHTML = `${Math.round(state.maxSpeed)}<small> km/h</small>`;
+    distanceEl.innerHTML = `${(state.distanceM/1000).toFixed(2)}<small> km</small>`;
+    const elapsedH = state.tripStartTs ? (Date.now() - state.tripStartTs) / 3600000 : 0;
+    const avg = elapsedH > 0 ? (state.distanceM/1000) / elapsedH : 0;
+    avgSpeedEl.innerHTML = `${Math.round(avg)}<small> km/h</small>`;
+  }
+
+  function tickTimer(){
+    if(!state.tripStartTs) return;
+    const elapsedSec = (Date.now() - state.tripStartTs) / 1000;
+    tripTimeEl.textContent = formatTime(elapsedSec);
+    updateStatsUI();
+  }
+
+  function determineMood(smoothed){
+    state.speedHistory.push({ v: smoothed, t: Date.now() });
+    if(state.speedHistory.length > 6) state.speedHistory.shift();
+    if(state.speedHistory.length < 2 || smoothed < 1){
+      return 'idle';
+    }
+    const first = state.speedHistory[0];
+    const last = state.speedHistory[state.speedHistory.length - 1];
+    const dt = (last.t - first.t) / 1000;
+    if(dt <= 0) return 'cruise';
+    const slope = (last.v - first.v) / dt; // km/h per second
+    if(slope > 1.2) return 'accel';
+    if(slope < -1.2) return 'brake';
+    return 'cruise';
+  }
+
+  function handlePosition(pos){
+    const { latitude, longitude, speed, accuracy } = pos.coords;
+    const now = Date.now();
+
+    gpsDot.className = 'gps-dot locked';
+    gpsText.textContent = `Locked ±${Math.round(accuracy)}m`;
+
+    let instKmh = null;
+    if(typeof speed === 'number' && speed !== null && !Number.isNaN(speed)){
+      instKmh = speed * 3.6;
+    }
+
+    if(state.lastPos){
+      const dt = (now - state.lastPos.t) / 1000;
+      if(dt > 0.2){
+        const distM = haversine(state.lastPos.lat, state.lastPos.lon, latitude, longitude);
+        const computedKmh = (distM / dt) * 3.6;
+        if(instKmh === null) instKmh = computedKmh;
+
+        // accumulate distance only for sane, real movement (filters GPS jitter)
+        if(computedKmh < 300 && instKmh > 1){
+          state.distanceM += distM;
+        }
+      }
+    }
+    state.lastPos = { lat: latitude, lon: longitude, t: now };
+
+    if(instKmh === null) instKmh = 0;
+    instKmh = Math.max(0, instKmh);
+
+    // exponential smoothing for a stable readout
+    state.smoothedSpeed = state.smoothedSpeed * 0.65 + instKmh * 0.35;
+    if(state.smoothedSpeed > state.maxSpeed) state.maxSpeed = state.smoothedSpeed;
+
+    setGauge(state.smoothedSpeed);
+    applyTheme(determineMood(state.smoothedSpeed));
+    updateStatsUI();
+  }
+
+  function handleError(err){
+    if(err.code === err.PERMISSION_DENIED){
+      gpsDot.className = 'gps-dot denied';
+      gpsText.textContent = 'Permission denied';
+      overlayError.textContent = 'Location access was blocked — either denied in the browser, or disallowed by the page this is embedded in. Try opening this HTML file directly in its own browser tab.';
+      overlay.classList.remove('hidden');
+    } else if(err.code === err.TIMEOUT){
+      gpsDot.className = 'gps-dot';
+      gpsText.textContent = 'No fix yet — retrying';
+    } else {
+      gpsDot.className = 'gps-dot';
+      gpsText.textContent = 'Signal lost — retrying';
+    }
+  }
+
+  function startTracking(){
+    if(!('geolocation' in navigator)){
+      overlayError.textContent = 'Geolocation is not supported on this device or browser.';
+      return;
+    }
+    if(!window.isSecureContext){
+      overlayError.textContent = 'This page must be opened over HTTPS (or localhost) for GPS to work — not as a local file:// path or inside an embedded preview.';
+      return;
+    }
+    overlayError.textContent = 'Requesting location permission…';
+    state.tripStartTs = Date.now();
+    state.timerInterval = setInterval(tickTimer, 1000);
+    state.watchId = navigator.geolocation.watchPosition(handlePosition, handleError, {
+      enableHighAccuracy: true,
+      maximumAge: 0,
+      timeout: 15000
+    });
+    overlay.classList.add('hidden');
+  }
+
+  function resetTrip(){
+    state.maxSpeed = 0;
+    state.distanceM = 0;
+    state.smoothedSpeed = 0;
+    state.speedHistory = [];
+    state.lastPos = null;
+    state.tripStartTs = state.watchId !== null ? Date.now() : null;
+    setGauge(0);
+    applyTheme('idle');
+    updateStatsUI();
+    tripTimeEl.textContent = '00:00';
+  }
+
+  ignitionBtn.addEventListener('click', startTracking);
+  resetBtn.addEventListener('click', resetTrip);
+
+  // initial paint
+  setGauge(0);
+  applyTheme('idle');
+})();
+</script>
+</body>
+</html>
