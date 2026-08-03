@@ -127,22 +127,24 @@
   }
   .dial-face{
     position:absolute;
-    inset: 4%;
+    inset: 3%;
+    z-index:0;
     border-radius:50%;
     background: radial-gradient(circle at 50% 40%, var(--dial-hi) 0%, var(--dial-lo) 78%, #c9bc95 100%);
     box-shadow: inset 0 0 0 3px #1a1712, inset 0 8px 22px rgba(0,0,0,.22), 0 3px 8px rgba(0,0,0,.45);
   }
   .backlight{
     position:absolute;
-    inset: 4%;
+    inset: 3%;
+    z-index:1;
     border-radius:50%;
-    background: radial-gradient(circle at 50% 42%, var(--accent-soft) 0%, transparent 68%);
-    mix-blend-mode: multiply;
-    opacity:.65;
+    background: radial-gradient(circle at 50% 46%, transparent 38%, var(--accent-soft) 58%, transparent 84%);
+    mix-blend-mode: screen;
+    opacity:.85;
     transition: background var(--transition-speed) ease;
     pointer-events:none;
   }
-  .gauge{ width:100%; height:100%; display:block; overflow: visible; position:relative; }
+  .gauge{ width:100%; height:100%; display:block; overflow: visible; position:relative; z-index:2; }
   .track-arc{
     fill:none;
     stroke: var(--ink);
@@ -150,13 +152,16 @@
     opacity:.55;
   }
   .progress-arc{ display:none; }
-  .tick{ stroke: var(--ink); stroke-width: 1.6; opacity:.75; }
-  .tick.major{ stroke:var(--ink); stroke-width:2.2; opacity:.95; }
+  .tick{ stroke: var(--ink); stroke-width: 1.6; opacity:.8; }
+  .tick.major{ stroke:var(--ink); stroke-width:2.4; opacity:1; }
   .tick-label{
     fill: var(--ink);
+    stroke: rgba(255,255,255,.55);
+    stroke-width: 2.5px;
+    paint-order: stroke fill;
     font-family:'Rajdhani', sans-serif;
-    font-weight:600;
-    font-size: 15px;
+    font-weight:700;
+    font-size: 17px;
     text-anchor: middle;
     dominant-baseline: middle;
   }
@@ -175,6 +180,7 @@
     position:absolute;
     top: 63%; left:50%;
     transform: translate(-50%,-50%);
+    z-index:3;
     text-align:center;
     background: var(--lcd-bg);
     border-radius: 6px;
@@ -203,6 +209,7 @@
     position:absolute;
     top: 82%; left:50%;
     transform: translate(-50%,-50%);
+    z-index:3;
     display:flex;
     align-items:center;
     gap:6px;
@@ -418,7 +425,7 @@
   const ARC_R = 135;          // track/progress arc radius
   const TICK_OUTER = { minor: 156, major: 160 };
   const TICK_INNER = { minor: 146, major: 142 };
-  const LABEL_R = 165;
+  const LABEL_R = 168;
   const START_ANGLE = 135;    // degrees, screen convention (0=east,90=south,clockwise)
   const SWEEP = 270;
 
